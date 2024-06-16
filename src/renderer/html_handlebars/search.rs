@@ -168,7 +168,7 @@ fn render_item(
                 // in an HtmlBlock tag. We must collect consecutive Html events
                 // into a block ourselves.
                 while let Some(Event::Html(html)) = p.peek() {
-                    html_block.push_str(html);
+                    html_block.push_str(&html);
                     p.next();
                 }
                 body.push_str(&clean_html(&html_block));
