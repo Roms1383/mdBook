@@ -4,7 +4,8 @@
 
 There is a feature in mdBook that lets you hide code lines by prepending them with a specific prefix.
 
-For the Rust language, you can use the `#` character as a prefix which will hide lines [like you would with Rustdoc][rustdoc-hide].
+For the Rust language, you can prefix lines with `# ` (`#` followed by a space) to hide them [like you would with Rustdoc][rustdoc-hide].
+This prefix can be escaped with `##` to prevent the hiding of a line that should begin with the literal string `# ` (see [Rustdoc's docs][rustdoc-hide] for more details)
 
 [rustdoc-hide]: https://doc.rust-lang.org/stable/rustdoc/write-documentation/documentation-tests.html#hiding-portions-of-the-example
 
@@ -121,7 +122,7 @@ These use the same attributes as [rustdoc attributes], with a few additions:
 * `no_run` --- The code is compiled when tested, but it is not run.
   The play button is also not shown.
 * `compile_fail` --- The code should fail to compile.
-* `edition2015`, `edition2018`, `edition2021` --- Forces the use of a specific Rust edition.
+* `edition2015`, `edition2018`, `edition2021`, `edition2024` --- Forces the use of a specific Rust edition.
   See [`rust.edition`] to set this globally.
 
 [`mdbook test`]: ../cli/test.md

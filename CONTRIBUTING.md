@@ -138,8 +138,45 @@ We generally strive to keep mdBook compatible with a relatively recent browser o
 That is, supporting Chrome, Safari, Firefox, Edge on Windows, macOS, Linux, iOS, and Android.
 If possible, do your best to avoid breaking older browser releases.
 
-Any change to the HTML or styling is encouraged to manually check on as many browsers and platforms that you can.
-Unfortunately at this time we don't have any automated UI or browser testing, so your assistance in testing is appreciated.
+GUI tests are checked with the GUI testsuite. To run it, you need to install `npm` first. Then run:
+
+```
+cargo test --test gui
+```
+
+If you want to only run some tests, you can filter them by passing (part of) their name:
+
+```
+cargo test --test gui -- search
+```
+
+The first time, it'll fail and ask you to install the `browser-ui-test` package. Install it with the provided
+command then re-run the tests.
+
+If you want to disable the headless mode, use the `--disable-headless-test` option:
+
+```
+cargo test --test gui -- --disable-headless-test
+```
+
+The GUI tests are in the directory `tests/gui` in text files with the `.goml` extension. These tests are run
+using a `node.js` framework called `browser-ui-test`. You can find documentation for this language on its
+[repository](https://github.com/GuillaumeGomez/browser-UI-test/blob/master/goml-script.md).
+
+### Checking changes in `.js` files
+
+The `.js` files source code is checked using [`eslint`](https://eslint.org/). This is a linter (just like `clippy` in Rust)
+for the Javascript language. You can install it with `npm` by running the following command:
+
+```
+npm install
+```
+
+Then you can run it using:
+
+```
+npm run lint
+```
 
 ## Updating highlight.js
 

@@ -3,6 +3,7 @@ use log::{debug, trace, warn};
 use memchr::Memchr;
 use pulldown_cmark::{DefaultBrokenLinkCallback, Event, HeadingLevel, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fmt::{self, Display, Formatter};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
@@ -245,12 +246,39 @@ impl<'a> SummaryParser<'a> {
             .parse_affix(false)
             .with_context(|| "There was an error parsing the suffix chapters")?;
 
+        let mut files = HashSet::new();
+        for part in [&prefix_chapters, &numbered_chapters, &suffix_chapters] {
+            Self::check_for_duplicates(&part, &mut files)?;
+        }
+
         Ok(Summary {
             title,
             prefix_chapters,
             numbered_chapters,
             suffix_chapters,
         })
+    }
+
+    /// Recursively check for duplicate files in the summary items.
+    fn check_for_duplicates<'b>(
+        items: &'b [SummaryItem],
+        files: &mut HashSet<&'b PathBuf>,
+    ) -> Result<()> {
+        for item in items {
+            if let SummaryItem::Link(link) = item {
+                if let Some(location) = &link.location {
+                    if !files.insert(location) {
+                        bail!(anyhow::anyhow!(
+                            "Duplicate file in SUMMARY.md: {:?}",
+                            location
+                        ));
+                    }
+                }
+                // Recursively check nested items
+                Self::check_for_duplicates(&link.nested_items, files)?;
+            }
+        }
+        Ok(())
     }
 
     /// Parse the affix chapters.
@@ -616,7 +644,7 @@ impl Display for SectionNumber {
             write!(f, "0")
         } else {
             for item in &self.0 {
-                write!(f, "{}.", item)?;
+                write!(f, "{item}.")?;
             }
             Ok(())
         }
@@ -747,6 +775,20 @@ mod tests {
         let got = parser.parse_affix(false);
 
         assert!(got.is_err());
+        let error_message = got.err().unwrap().to_string();
+        assert_eq!(error_message, "failed to parse SUMMARY.md line 2, column 1: Suffix chapters cannot be followed by a list");
+    }
+
+    #[test]
+    fn expected_a_start_of_a_link() {
+        let src = "- Title\n";
+        let mut parser = SummaryParser::new(src);
+
+        let got = parser.parse_affix(false);
+
+        assert!(got.is_err());
+        let error_message = got.err().unwrap().to_string();
+        assert_eq!(error_message, "failed to parse SUMMARY.md line 1, column 0: Suffix chapters cannot be followed by a list");
     }
 
     #[test]
@@ -763,7 +805,7 @@ mod tests {
 
         let href = match parser.stream.next() {
             Some((Event::Start(Tag::Link { dest_url, .. }), _range)) => dest_url.to_string(),
-            other => panic!("Unreachable, {:?}", other),
+            other => panic!("Unreachable, {other:?}"),
         };
 
         let got = parser.parse_link(href);
@@ -1112,5 +1154,84 @@ mod tests {
 
         let got = parser.parse_affix(false).unwrap();
         assert_eq!(got, should_be);
+    }
+
+    #[test]
+    fn duplicate_entries_1() {
+        let src = r#"
+# Summary
+- [A](./a.md)
+- [A](./a.md)
+"#;
+
+        let res = parse_summary(src);
+        assert!(res.is_err());
+        let error_message = res.err().unwrap().to_string();
+        assert_eq!(error_message, r#"Duplicate file in SUMMARY.md: "./a.md""#);
+    }
+
+    #[test]
+    fn duplicate_entries_2() {
+        let src = r#"
+# Summary
+- [A](./a.md)
+  - [A](./a.md)
+"#;
+
+        let res = parse_summary(src);
+        assert!(res.is_err());
+        let error_message = res.err().unwrap().to_string();
+        assert_eq!(error_message, r#"Duplicate file in SUMMARY.md: "./a.md""#);
+    }
+    #[test]
+    fn duplicate_entries_3() {
+        let src = r#"
+# Summary
+- [A](./a.md)
+- [B](./b.md)
+  - [A](./a.md)
+"#;
+
+        let res = parse_summary(src);
+        assert!(res.is_err());
+        let error_message = res.err().unwrap().to_string();
+        assert_eq!(error_message, r#"Duplicate file in SUMMARY.md: "./a.md""#);
+    }
+
+    #[test]
+    fn duplicate_entries_4() {
+        let src = r#"
+# Summary
+[A](./a.md)
+- [B](./b.md)
+- [A](./a.md)
+"#;
+
+        let res = parse_summary(src);
+        assert!(res.is_err());
+        let error_message = res.err().unwrap().to_string();
+        assert_eq!(error_message, r#"Duplicate file in SUMMARY.md: "./a.md""#);
+    }
+
+    #[test]
+    fn duplicate_entries_5() {
+        let src = r#"
+# Summary
+[A](./a.md)
+
+# hi
+- [B](./b.md)
+
+# bye
+
+---
+
+[A](./a.md)
+"#;
+
+        let res = parse_summary(src);
+        assert!(res.is_err());
+        let error_message = res.err().unwrap().to_string();
+        assert_eq!(error_message, r#"Duplicate file in SUMMARY.md: "./a.md""#);
     }
 }

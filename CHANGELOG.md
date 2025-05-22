@@ -1,5 +1,177 @@
 # Changelog
 
+## mdBook 0.4.49
+[v0.4.48...v0.4.49](https://github.com/rust-lang/mdBook/compare/v0.4.48...v0.4.49)
+
+### Added
+
+- Added a warning on unused fields in the root of `book.toml`.
+  [#2622](https://github.com/rust-lang/mdBook/pull/2622)
+
+### Changed
+
+- Updated dependencies.
+  [#2650](https://github.com/rust-lang/mdBook/pull/2650)
+  [#2688](https://github.com/rust-lang/mdBook/pull/2688)
+- Updated minimum Rust version to 1.81.
+  [#2688](https://github.com/rust-lang/mdBook/pull/2688)
+- The unused `book.multilingual` field is no longer serialized, or shown in `mdbook init`.
+  [#2689](https://github.com/rust-lang/mdBook/pull/2689)
+- Speed up search index loading by using `JSON.parse` instead of parsing JavaScript.
+  [#2633](https://github.com/rust-lang/mdBook/pull/2633)
+
+### Fixed
+
+- Search highlighting will not try to highlight in SVG `<text>` elements because it breaks the element.
+  [#2668](https://github.com/rust-lang/mdBook/pull/2668)
+- Fixed scrolling of the sidebar when a search highlight term is in the URL.
+  [#2675](https://github.com/rust-lang/mdBook/pull/2675)
+- Fixed issues when multiple footnote definitions use the same ID. Now, only one definition is used, and a warning is displayed.
+  [#2681](https://github.com/rust-lang/mdBook/pull/2681)
+- The sidebar is now restricted to 80% of the viewport width to make it possible to collapse it when the viewport is very narrow.
+  [#2679](https://github.com/rust-lang/mdBook/pull/2679)
+
+## mdBook 0.4.48
+[v0.4.47...v0.4.48](https://github.com/rust-lang/mdBook/compare/v0.4.47...v0.4.48)
+
+### Added
+
+- Footnotes now have back-reference links. These links bring the reader back to the original location. As part of this change, footnotes are now only rendered at the bottom of the page. This also includes some styling updates and fixes for footnote rendering.
+  [#2626](https://github.com/rust-lang/mdBook/pull/2626)
+- Added an "Auto" theme selection option which will default to the system-preferred mode. This will also automatically switch when the system changes the preferred mode.
+  [#2576](https://github.com/rust-lang/mdBook/pull/2576)
+
+### Changed
+
+- The `searchindex.json` file has been removed; only the `searchindex.js` file will be generated.
+  [#2552](https://github.com/rust-lang/mdBook/pull/2552)
+- Updated Javascript code to use eslint.
+  [#2554](https://github.com/rust-lang/mdBook/pull/2554)
+- An error is generated if there are duplicate files in `SUMMARY.md`.
+  [#2613](https://github.com/rust-lang/mdBook/pull/2613)
+
+## mdBook 0.4.47
+[v0.4.46...v0.4.47](https://github.com/rust-lang/mdBook/compare/v0.4.46...v0.4.47)
+
+### Fixed
+
+- Fixed search not showing up in sub-directories.
+  [#2586](https://github.com/rust-lang/mdBook/pull/2586)
+
+## mdBook 0.4.46
+[v0.4.45...v0.4.46](https://github.com/rust-lang/mdBook/compare/v0.4.45...v0.4.46)
+
+### Changed
+
+- The `output.html.hash-files` config option has been added to add hashes to static filenames to bust any caches when a book is updated. `{{resource}}` template tags have been added so that links can be properly generated to those files.
+  [#1368](https://github.com/rust-lang/mdBook/pull/1368)
+
+### Fixed
+
+- Playground links for Rust 2024 now set the edition correctly.
+  [#2557](https://github.com/rust-lang/mdBook/pull/2557)
+
+## mdBook 0.4.45
+[v0.4.44...v0.4.45](https://github.com/rust-lang/mdBook/compare/v0.4.44...v0.4.45)
+
+### Changed
+
+- Added context to error message when rustdoc is not found.
+  [#2545](https://github.com/rust-lang/mdBook/pull/2545)
+- Slightly changed the styling rules around margins of footnotes.
+  [#2524](https://github.com/rust-lang/mdBook/pull/2524)
+
+### Fixed
+
+- Fixed an issue where it would panic if a source_path is not set.
+  [#2550](https://github.com/rust-lang/mdBook/pull/2550)
+
+## mdBook 0.4.44
+[v0.4.43...v0.4.44](https://github.com/rust-lang/mdBook/compare/v0.4.43...v0.4.44)
+
+### Added
+
+- Added pre-built aarch64-apple-darwin binaries to the releases.
+  [#2500](https://github.com/rust-lang/mdBook/pull/2500)
+- `mdbook clean` now shows a summary of what it did.
+  [#2458](https://github.com/rust-lang/mdBook/pull/2458)
+- Added the `output.html.search.chapter` config setting to disable search indexing of individual chapters.
+  [#2533](https://github.com/rust-lang/mdBook/pull/2533)
+
+### Fixed
+
+- Fixed auto-scrolling the side-bar when loading a page with a `#` fragment URL.
+  [#2517](https://github.com/rust-lang/mdBook/pull/2517)
+- Fixed display of sidebar when javascript is disabled.
+  [#2529](https://github.com/rust-lang/mdBook/pull/2529)
+- Fixed the sidebar visibility getting out of sync with the button.
+  [#2532](https://github.com/rust-lang/mdBook/pull/2532)
+
+### Changed
+
+- ❗ Rust code block hidden lines now follow the same logic as rustdoc. This requires a space after the `#` symbol.
+  [#2530](https://github.com/rust-lang/mdBook/pull/2530)
+- ❗ Updated the Linux pre-built binaries which requires a newer version of glibc (2.34).
+  [#2523](https://github.com/rust-lang/mdBook/pull/2523)
+- Updated dependencies
+  [#2538](https://github.com/rust-lang/mdBook/pull/2538)
+  [#2539](https://github.com/rust-lang/mdBook/pull/2539)
+
+## mdBook 0.4.43
+[v0.4.42...v0.4.43](https://github.com/rust-lang/mdBook/compare/v0.4.42...v0.4.43)
+
+### Fixed
+
+- Fixed setting the title in `mdbook init` when no git user is configured.
+  [#2486](https://github.com/rust-lang/mdBook/pull/2486)
+
+### Changed
+
+- The Rust 2024 edition no longer needs `-Zunstable-options`.
+  [#2495](https://github.com/rust-lang/mdBook/pull/2495)
+
+## mdBook 0.4.42
+[v0.4.41...v0.4.42](https://github.com/rust-lang/mdBook/compare/v0.4.41...v0.4.42)
+
+### Fixed
+
+- Fixed chapter list folding.
+  [#2473](https://github.com/rust-lang/mdBook/pull/2473)
+
+## mdBook 0.4.41
+[v0.4.40...v0.4.41](https://github.com/rust-lang/mdBook/compare/v0.4.40...v0.4.41)
+
+**Note:** If you have a custom `index.hbs` theme file, you will need to update it to the latest version.
+
+### Added
+
+- Added preliminary support for Rust 2024 edition.
+  [#2398](https://github.com/rust-lang/mdBook/pull/2398)
+- Added a full example of the remove-emphasis preprocessor.
+  [#2464](https://github.com/rust-lang/mdBook/pull/2464)
+
+### Changed
+
+- Adjusted styling of clipboard/play icons.
+  [#2421](https://github.com/rust-lang/mdBook/pull/2421)
+- Updated to handlebars v6.
+  [#2416](https://github.com/rust-lang/mdBook/pull/2416)
+- Attr and section rules now have specific code highlighting.
+  [#2448](https://github.com/rust-lang/mdBook/pull/2448)
+- The sidebar is now loaded from a common file, significantly reducing the book size when there are many chapters.
+  [#2414](https://github.com/rust-lang/mdBook/pull/2414)
+- Updated dependencies.
+  [#2470](https://github.com/rust-lang/mdBook/pull/2470)
+
+### Fixed
+
+- Improved theme support when JavaScript is disabled.
+  [#2454](https://github.com/rust-lang/mdBook/pull/2454)
+- Fixed broken themes when localStorage has an invalid theme id.
+  [#2463](https://github.com/rust-lang/mdBook/pull/2463)
+- Adjusted the line-height of superscripts (and footnotes) to avoid adding extra space between lines.
+  [#2465](https://github.com/rust-lang/mdBook/pull/2465)
+
 ## mdBook 0.4.40
 [v0.4.39...v0.4.40](https://github.com/rust-lang/mdBook/compare/v0.4.39...v0.4.40)
 

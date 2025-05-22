@@ -18,11 +18,11 @@ pub fn load_book<P: AsRef<Path>>(src_dir: P, cfg: &BuildConfig) -> Result<Book> 
 
     let mut summary_content = String::new();
     File::open(&summary_md)
-        .with_context(|| format!("Couldn't open SUMMARY.md in {:?} directory", src_dir))?
+        .with_context(|| format!("Couldn't open SUMMARY.md in {src_dir:?} directory"))?
         .read_to_string(&mut summary_content)?;
 
     let summary = parse_summary(&summary_content)
-        .with_context(|| format!("Summary parsing failed for file={:?}", summary_md))?;
+        .with_context(|| format!("Summary parsing failed for file={summary_md:?}"))?;
 
     if cfg.create_missing {
         create_missing(src_dir, &summary).with_context(|| "Unable to create missing chapters")?;
@@ -173,7 +173,8 @@ pub struct Chapter {
     /// `index.md` via the [`Chapter::path`] field. The `source_path` field
     /// exists if you need access to the true file path.
     ///
-    /// This is `None` for a draft chapter.
+    /// This is `None` for a draft chapter, or a synthetically generated
+    /// chapter that has no file on disk.
     pub source_path: Option<PathBuf>,
     /// An ordered list of the names of each chapter above this one in the hierarchy.
     pub parent_names: Vec<String>,
@@ -341,7 +342,7 @@ impl<'a> Iterator for BookItems<'a> {
 impl Display for Chapter {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         if let Some(ref section_number) = self.number {
-            write!(f, "{} ", section_number)?;
+            write!(f, "{section_number} ")?;
         }
 
         write!(f, "{}", self.name)
@@ -645,5 +646,20 @@ And here is some \
 
         let got = load_book_from_disk(&summary, temp.path());
         assert!(got.is_err());
+    }
+
+    #[test]
+    fn cant_open_summary_md() {
+        let cfg = BuildConfig::default();
+        let temp_dir = TempFileBuilder::new().prefix("book").tempdir().unwrap();
+
+        let got = load_book(&temp_dir, &cfg);
+        assert!(got.is_err());
+        let error_message = got.err().unwrap().to_string();
+        let expected = format!(
+            r#"Couldn't open SUMMARY.md in {:?} directory"#,
+            temp_dir.path()
+        );
+        assert_eq!(error_message, expected);
     }
 }

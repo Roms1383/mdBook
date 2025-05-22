@@ -145,7 +145,7 @@ impl Config {
                 if let serde_json::Value::Object(ref map) = parsed_value {
                     // To `set` each `key`, we wrap them as `prefix.key`
                     for (k, v) in map {
-                        let full_key = format!("{}.{}", key, k);
+                        let full_key = format!("{key}.{k}");
                         self.set(&full_key, v).expect("unreachable");
                     }
                     return;
@@ -312,6 +312,8 @@ impl<'de> serde::Deserialize<'de> for Config {
             return Ok(Config::from_legacy(raw));
         }
 
+        warn_on_invalid_fields(&raw);
+
         use serde::de::Error;
         let mut table = match raw {
             Value::Table(t) => t,
@@ -376,6 +378,17 @@ fn parse_env(key: &str) -> Option<String> {
         .map(|key| key.to_lowercase().replace("__", ".").replace('_', "-"))
 }
 
+fn warn_on_invalid_fields(table: &Value) {
+    let valid_items = ["book", "build", "rust", "output", "preprocessor"];
+
+    let table = table.as_table().expect("root must be a table");
+    for item in table.keys() {
+        if !valid_items.contains(&item.as_str()) {
+            warn!("Invalid field {:?} in book.toml", &item);
+        }
+    }
+}
+
 fn is_legacy_format(table: &Value) -> bool {
     let legacy_items = [
         "title",
@@ -408,6 +421,9 @@ pub struct BookConfig {
     /// Location of the book source relative to the book's root directory.
     pub src: PathBuf,
     /// Does this book support more than one language?
+    // TODO: Remove this field in 0.5, it is unused:
+    // https://github.com/rust-lang/mdBook/issues/2636
+    #[serde(skip_serializing)]
     pub multilingual: bool,
     /// The main language of the book.
     pub language: Option<String>,
@@ -587,6 +603,9 @@ pub struct HtmlConfig {
     /// The mapping from old pages to new pages/URLs to use when generating
     /// redirects.
     pub redirect: HashMap<String, String>,
+    /// If this option is turned on, "cache bust" static files by adding
+    /// hashes to their file names.
+    pub hash_files: bool,
 }
 
 impl Default for HtmlConfig {
@@ -616,6 +635,7 @@ impl Default for HtmlConfig {
             cname: None,
             live_reload_endpoint: None,
             redirect: HashMap::new(),
+            hash_files: false,
         }
     }
 }
@@ -735,6 +755,11 @@ pub struct Search {
     /// Copy JavaScript files for the search functionality to the output directory?
     /// Default: `true`.
     pub copy_js: bool,
+    /// Specifies search settings for the given path.
+    ///
+    /// The path can be for a specific chapter, or a directory. This will
+    /// merge recursively, with more specific paths taking precedence.
+    pub chapter: HashMap<String, SearchChapterSettings>,
 }
 
 impl Default for Search {
@@ -751,8 +776,17 @@ impl Default for Search {
             expand: true,
             heading_split_level: 3,
             copy_js: true,
+            chapter: HashMap::new(),
         }
     }
+}
+
+/// Search options for chapters (or paths).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct SearchChapterSettings {
+    /// Whether or not indexing is enabled, default `true`.
+    pub enable: Option<bool>,
 }
 
 /// Allows you to "update" any arbitrary field in a struct by round-tripping via

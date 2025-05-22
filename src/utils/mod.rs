@@ -1,11 +1,10 @@
-#![allow(missing_docs)] // FIXME: Document this
+//! Various helpers and utilities.
 
 pub mod fs;
 mod string;
 pub(crate) mod toml_ext;
 use crate::errors::Error;
 use log::error;
-use once_cell::sync::Lazy;
 use pulldown_cmark::{html, CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd};
 use regex::Regex;
 
@@ -13,6 +12,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::Path;
+use std::sync::LazyLock;
 
 pub use self::string::{
     take_anchored_lines, take_lines, take_rustdoc_include_anchored_lines,
@@ -21,7 +21,7 @@ pub use self::string::{
 
 /// Replaces multiple consecutive whitespace characters with a single space character.
 pub fn collapse_whitespace(text: &str) -> Cow<'_, str> {
-    static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s\s+").unwrap());
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s\s+").unwrap());
     RE.replace_all(text, " ")
 }
 
@@ -50,7 +50,7 @@ pub fn id_from_content(content: &str) -> String {
     let mut content = content.to_string();
 
     // Skip any tags or html-encoded stuff
-    static HTML: Lazy<Regex> = Lazy::new(|| Regex::new(r"(<.*?>)").unwrap());
+    static HTML: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(<.*?>)").unwrap());
     content = HTML.replace_all(&content, "").into();
     const REPL_SUB: &[&str] = &["&lt;", "&gt;", "&amp;", "&#39;", "&quot;"];
     for sub in REPL_SUB {
@@ -77,7 +77,7 @@ pub fn unique_id_from_content(content: &str, id_counter: &mut HashMap<String, us
     let id_count = id_counter.entry(id.clone()).or_insert(0);
     let unique_id = match *id_count {
         0 => id,
-        id_count => format!("{}-{}", id, id_count),
+        id_count => format!("{id}-{id_count}"),
     };
     *id_count += 1;
     unique_id
@@ -93,9 +93,10 @@ pub fn unique_id_from_content(content: &str, id_counter: &mut HashMap<String, us
 /// None. Ideally, print page links would link to anchors on the print page,
 /// but that is very difficult.
 fn adjust_links<'a>(event: Event<'a>, path: Option<&Path>) -> Event<'a> {
-    static SCHEME_LINK: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-z][a-z0-9+.-]*:").unwrap());
-    static MD_LINK: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r"(?P<link>.*)\.md(?P<anchor>#.*)?").unwrap());
+    static SCHEME_LINK: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^[a-z][a-z0-9+.-]*:").unwrap());
+    static MD_LINK: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?P<link>.*)\.md(?P<anchor>#.*)?").unwrap());
 
     fn fix<'a>(dest: CowStr<'a>, path: Option<&Path>) -> CowStr<'a> {
         if dest.starts_with('#') {
@@ -105,7 +106,7 @@ fn adjust_links<'a>(event: Event<'a>, path: Option<&Path>) -> Event<'a> {
                 if base.ends_with(".md") {
                     base.replace_range(base.len() - 3.., ".html");
                 }
-                return format!("{}{}", base, dest).into();
+                return format!("{base}{dest}").into();
             } else {
                 return dest;
             }
@@ -121,7 +122,7 @@ fn adjust_links<'a>(event: Event<'a>, path: Option<&Path>) -> Event<'a> {
                     .to_str()
                     .expect("utf-8 paths only");
                 if !base.is_empty() {
-                    write!(fixed_link, "{}/", base).unwrap();
+                    write!(fixed_link, "{base}/").unwrap();
                 }
             }
 
@@ -148,8 +149,8 @@ fn adjust_links<'a>(event: Event<'a>, path: Option<&Path>) -> Event<'a> {
         // There are dozens of HTML tags/attributes that contain paths, so
         // feel free to add more tags if desired; these are the only ones I
         // care about right now.
-        static HTML_LINK: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r#"(<(?:a|img) [^>]*?(?:src|href)=")([^"]+?)""#).unwrap());
+        static HTML_LINK: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r#"(<(?:a|img) [^>]*?(?:src|href)=")([^"]+?)""#).unwrap());
 
         HTML_LINK
             .replace_all(&html, |caps: &regex::Captures<'_>| {
@@ -194,6 +195,7 @@ pub fn render_markdown(text: &str, smart_punctuation: bool) -> String {
     render_markdown_with_path(text, smart_punctuation, None)
 }
 
+/// Creates a new pulldown-cmark parser of the given text.
 pub fn new_cmark_parser(text: &str, smart_punctuation: bool) -> Parser<'_> {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_TABLES);
@@ -207,23 +209,180 @@ pub fn new_cmark_parser(text: &str, smart_punctuation: bool) -> Parser<'_> {
     Parser::new_ext(text, opts)
 }
 
+/// Renders markdown to HTML.
+///
+/// `path` should only be set if this is being generated for the consolidated
+/// print page. It should point to the page being rendered relative to the
+/// root of the book.
 pub fn render_markdown_with_path(
     text: &str,
     smart_punctuation: bool,
     path: Option<&Path>,
 ) -> String {
-    let mut s = String::with_capacity(text.len() * 3 / 2);
-    let p = new_cmark_parser(text, smart_punctuation);
-    let events = p
+    let mut body = String::with_capacity(text.len() * 3 / 2);
+
+    // Based on
+    // https://github.com/pulldown-cmark/pulldown-cmark/blob/master/pulldown-cmark/examples/footnote-rewrite.rs
+
+    // This handling of footnotes is a two-pass process. This is done to
+    // support linkbacks, little arrows that allow you to jump back to the
+    // footnote reference. The first pass collects the footnote definitions.
+    // The second pass modifies those definitions to include the linkbacks,
+    // and inserts the definitions back into the `events` list.
+
+    // This is a map of name -> (number, count)
+    // `name` is the name of the footnote.
+    // `number` is the footnote number displayed in the output.
+    // `count` is the number of references to this footnote (used for multiple
+    // linkbacks, and checking for unused footnotes).
+    let mut footnote_numbers = HashMap::new();
+    // This is a map of name -> Vec<Event>
+    // `name` is the name of the footnote.
+    // The events list is the list of events needed to build the footnote definition.
+    let mut footnote_defs = HashMap::new();
+
+    // The following are used when currently processing a footnote definition.
+    //
+    // This is the name of the footnote (escaped).
+    let mut in_footnote_name = String::new();
+    // This is the list of events to build the footnote definition.
+    let mut in_footnote = Vec::new();
+
+    let events = new_cmark_parser(text, smart_punctuation)
         .map(clean_codeblock_headers)
         .map(|event| adjust_links(event, path))
         .flat_map(|event| {
             let (a, b) = wrap_tables(event);
             a.into_iter().chain(b)
+        })
+        // Footnote rewriting must go last to ensure inner definition contents
+        // are processed (since they get pulled out of the initial stream).
+        .filter_map(|event| {
+            match event {
+                Event::Start(Tag::FootnoteDefinition(name)) => {
+                    if !in_footnote.is_empty() {
+                        log::warn!("internal bug: nested footnote not expected in {path:?}");
+                    }
+                    in_footnote_name = special_escape(&name);
+                    None
+                }
+                Event::End(TagEnd::FootnoteDefinition) => {
+                    let def_events = std::mem::take(&mut in_footnote);
+                    let name = std::mem::take(&mut in_footnote_name);
+
+                    if footnote_defs.contains_key(&name) {
+                        log::warn!(
+                            "footnote `{name}` in {} defined multiple times - \
+                             not updating to new definition",
+                            path.map_or_else(|| Cow::from("<unknown>"), |p| p.to_string_lossy())
+                        );
+                    } else {
+                        footnote_defs.insert(name, def_events);
+                    }
+                    None
+                }
+                Event::FootnoteReference(name) => {
+                    let name = special_escape(&name);
+                    let len = footnote_numbers.len() + 1;
+                    let (n, count) = footnote_numbers.entry(name.clone()).or_insert((len, 0));
+                    *count += 1;
+                    let html = Event::Html(
+                        format!(
+                            "<sup class=\"footnote-reference\" id=\"fr-{name}-{count}\">\
+                                <a href=\"#footnote-{name}\">{n}</a>\
+                             </sup>"
+                        )
+                        .into(),
+                    );
+                    if in_footnote_name.is_empty() {
+                        Some(html)
+                    } else {
+                        // While inside a footnote, we need to accumulate.
+                        in_footnote.push(html);
+                        None
+                    }
+                }
+                // While inside a footnote, accumulate all events into a local.
+                _ if !in_footnote_name.is_empty() => {
+                    in_footnote.push(event);
+                    None
+                }
+                _ => Some(event),
+            }
         });
 
-    html::push_html(&mut s, events);
-    s
+    html::push_html(&mut body, events);
+
+    if !footnote_defs.is_empty() {
+        add_footnote_defs(
+            &mut body,
+            path,
+            footnote_defs.into_iter().collect(),
+            &footnote_numbers,
+        );
+    }
+
+    body
+}
+
+/// Adds all footnote definitions into `body`.
+fn add_footnote_defs(
+    body: &mut String,
+    path: Option<&Path>,
+    mut defs: Vec<(String, Vec<Event<'_>>)>,
+    numbers: &HashMap<String, (usize, u32)>,
+) {
+    // Remove unused.
+    defs.retain(|(name, _)| {
+        if !numbers.contains_key(name) {
+            log::warn!(
+                "footnote `{name}` in `{}` is defined but not referenced",
+                path.map_or_else(|| Cow::from("<unknown>"), |p| p.to_string_lossy())
+            );
+            false
+        } else {
+            true
+        }
+    });
+
+    defs.sort_by_cached_key(|(name, _)| numbers[name].0);
+
+    body.push_str(
+        "<hr>\n\
+         <ol class=\"footnote-definition\">",
+    );
+
+    // Insert the backrefs to the definition, and put the definitions in the output.
+    for (name, mut fn_events) in defs {
+        let count = numbers[&name].1;
+        fn_events.insert(
+            0,
+            Event::Html(format!("<li id=\"footnote-{name}\">").into()),
+        );
+        // Generate the linkbacks.
+        for usage in 1..=count {
+            let nth = if usage == 1 {
+                String::new()
+            } else {
+                usage.to_string()
+            };
+            let backlink =
+                Event::Html(format!(" <a href=\"#fr-{name}-{usage}\">↩{nth}</a>").into());
+            if matches!(fn_events.last(), Some(Event::End(TagEnd::Paragraph))) {
+                // Put the linkback at the end of the last paragraph instead
+                // of on a line by itself.
+                fn_events.insert(fn_events.len() - 1, backlink);
+            } else {
+                // Not a clear place to put it in this circumstance, so put it
+                // at the end.
+                fn_events.push(backlink);
+            }
+        }
+        fn_events.push(Event::Html("</li>\n".into()));
+        html::push_html(body, fn_events.into_iter());
+    }
+
+    body.push_str("</ol>");
 }
 
 /// Wraps tables in a `.table-wrapper` class to apply overflow-x rules to.
@@ -265,6 +424,26 @@ pub fn log_backtrace(e: &Error) {
     }
 }
 
+pub(crate) fn special_escape(mut s: &str) -> String {
+    let mut escaped = String::with_capacity(s.len());
+    let needs_escape: &[char] = &['<', '>', '\'', '"', '\\', '&'];
+    while let Some(next) = s.find(needs_escape) {
+        escaped.push_str(&s[..next]);
+        match s.as_bytes()[next] {
+            b'<' => escaped.push_str("&lt;"),
+            b'>' => escaped.push_str("&gt;"),
+            b'\'' => escaped.push_str("&#39;"),
+            b'"' => escaped.push_str("&quot;"),
+            b'\\' => escaped.push_str("&#92;"),
+            b'&' => escaped.push_str("&amp;"),
+            _ => unreachable!(),
+        }
+        s = &s[next + 1..];
+    }
+    escaped.push_str(s);
+    escaped
+}
+
 pub(crate) fn bracket_escape(mut s: &str) -> String {
     let mut escaped = String::with_capacity(s.len());
     let needs_escape: &[char] = &['<', '>'];
@@ -283,7 +462,7 @@ pub(crate) fn bracket_escape(mut s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::bracket_escape;
+    use super::{bracket_escape, special_escape};
 
     mod render_markdown {
         use super::super::render_markdown;
@@ -506,5 +685,20 @@ more text with spaces
         assert_eq!(bracket_escape("<>"), "&lt;&gt;");
         assert_eq!(bracket_escape("<test>"), "&lt;test&gt;");
         assert_eq!(bracket_escape("a<test>b"), "a&lt;test&gt;b");
+        assert_eq!(bracket_escape("'"), "'");
+        assert_eq!(bracket_escape("\\"), "\\");
+    }
+
+    #[test]
+    fn escaped_special() {
+        assert_eq!(special_escape(""), "");
+        assert_eq!(special_escape("<"), "&lt;");
+        assert_eq!(special_escape(">"), "&gt;");
+        assert_eq!(special_escape("<>"), "&lt;&gt;");
+        assert_eq!(special_escape("<test>"), "&lt;test&gt;");
+        assert_eq!(special_escape("a<test>b"), "a&lt;test&gt;b");
+        assert_eq!(special_escape("'"), "&#39;");
+        assert_eq!(special_escape("\\"), "&#92;");
+        assert_eq!(special_escape("&"), "&amp;");
     }
 }

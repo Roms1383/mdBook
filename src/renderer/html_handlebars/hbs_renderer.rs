@@ -2,8 +2,9 @@ use crate::book::{Book, BookItem};
 use crate::config::{BookConfig, Code, Config, HtmlConfig, Playground, RustEdition};
 use crate::errors::*;
 use crate::renderer::html_handlebars::helpers;
+use crate::renderer::html_handlebars::StaticFiles;
 use crate::renderer::{RenderContext, Renderer};
-use crate::theme::{self, playground_editor, Theme};
+use crate::theme::{self, Theme};
 use crate::utils;
 
 use std::borrow::Cow;
@@ -11,18 +12,20 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use crate::utils::fs::get_404_output_file;
 use handlebars::Handlebars;
 use log::{debug, trace, warn};
-use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use serde_json::json;
 
+/// The HTML renderer for mdBook.
 #[derive(Default)]
 pub struct HtmlHandlebars;
 
 impl HtmlHandlebars {
+    /// Returns a new instance of [`HtmlHandlebars`].
     pub fn new() -> Self {
         HtmlHandlebars
     }
@@ -153,13 +156,13 @@ impl HtmlHandlebars {
         let content_404 = if let Some(ref filename) = html_config.input_404 {
             let path = src_dir.join(filename);
             std::fs::read_to_string(&path)
-                .with_context(|| format!("unable to open 404 input file {:?}", path))?
+                .with_context(|| format!("unable to open 404 input file {path:?}"))?
         } else {
             // 404 input not explicitly configured try the default file 404.md
             let default_404_location = src_dir.join("404.md");
             if default_404_location.exists() {
                 std::fs::read_to_string(&default_404_location).with_context(|| {
-                    format!("unable to open 404 input file {:?}", default_404_location)
+                    format!("unable to open 404 input file {default_404_location:?}")
                 })?
             } else {
                 "# Document not found (404)\n\nThis URL is invalid, sorry. Please use the \
@@ -206,7 +209,6 @@ impl HtmlHandlebars {
         Ok(())
     }
 
-    #[allow(clippy::let_and_return)]
     fn post_process(
         &self,
         rendered: String,
@@ -220,134 +222,6 @@ impl HtmlHandlebars {
         let rendered = hide_lines(&rendered, code_config);
 
         rendered
-    }
-
-    fn copy_static_files(
-        &self,
-        destination: &Path,
-        theme: &Theme,
-        html_config: &HtmlConfig,
-    ) -> Result<()> {
-        use crate::utils::fs::write_file;
-
-        write_file(
-            destination,
-            ".nojekyll",
-            b"This file makes sure that Github Pages doesn't process mdBook's output.\n",
-        )?;
-
-        if let Some(cname) = &html_config.cname {
-            write_file(destination, "CNAME", format!("{}\n", cname).as_bytes())?;
-        }
-
-        write_file(destination, "book.js", &theme.js)?;
-        write_file(destination, "css/general.css", &theme.general_css)?;
-        write_file(destination, "css/chrome.css", &theme.chrome_css)?;
-        if html_config.print.enable {
-            write_file(destination, "css/print.css", &theme.print_css)?;
-        }
-        write_file(destination, "css/variables.css", &theme.variables_css)?;
-        if let Some(contents) = &theme.favicon_png {
-            write_file(destination, "favicon.png", contents)?;
-        }
-        if let Some(contents) = &theme.favicon_svg {
-            write_file(destination, "favicon.svg", contents)?;
-        }
-        write_file(destination, "highlight.css", &theme.highlight_css)?;
-        write_file(destination, "tomorrow-night.css", &theme.tomorrow_night_css)?;
-        write_file(destination, "ayu-highlight.css", &theme.ayu_highlight_css)?;
-        write_file(destination, "highlight.js", &theme.highlight_js)?;
-        write_file(destination, "clipboard.min.js", &theme.clipboard_js)?;
-        write_file(
-            destination,
-            "FontAwesome/css/font-awesome.css",
-            theme::FONT_AWESOME,
-        )?;
-        write_file(
-            destination,
-            "FontAwesome/fonts/fontawesome-webfont.eot",
-            theme::FONT_AWESOME_EOT,
-        )?;
-        write_file(
-            destination,
-            "FontAwesome/fonts/fontawesome-webfont.svg",
-            theme::FONT_AWESOME_SVG,
-        )?;
-        write_file(
-            destination,
-            "FontAwesome/fonts/fontawesome-webfont.ttf",
-            theme::FONT_AWESOME_TTF,
-        )?;
-        write_file(
-            destination,
-            "FontAwesome/fonts/fontawesome-webfont.woff",
-            theme::FONT_AWESOME_WOFF,
-        )?;
-        write_file(
-            destination,
-            "FontAwesome/fonts/fontawesome-webfont.woff2",
-            theme::FONT_AWESOME_WOFF2,
-        )?;
-        write_file(
-            destination,
-            "FontAwesome/fonts/FontAwesome.ttf",
-            theme::FONT_AWESOME_TTF,
-        )?;
-        // Don't copy the stock fonts if the user has specified their own fonts to use.
-        if html_config.copy_fonts && theme.fonts_css.is_none() {
-            write_file(destination, "fonts/fonts.css", theme::fonts::CSS)?;
-            for (file_name, contents) in theme::fonts::LICENSES.iter() {
-                write_file(destination, file_name, contents)?;
-            }
-            for (file_name, contents) in theme::fonts::OPEN_SANS.iter() {
-                write_file(destination, file_name, contents)?;
-            }
-            write_file(
-                destination,
-                theme::fonts::SOURCE_CODE_PRO.0,
-                theme::fonts::SOURCE_CODE_PRO.1,
-            )?;
-        }
-        if let Some(fonts_css) = &theme.fonts_css {
-            if !fonts_css.is_empty() {
-                write_file(destination, "fonts/fonts.css", fonts_css)?;
-            }
-        }
-        if !html_config.copy_fonts && theme.fonts_css.is_none() {
-            warn!(
-                "output.html.copy-fonts is deprecated.\n\
-                This book appears to have copy-fonts=false in book.toml without a fonts.css file.\n\
-                Add an empty `theme/fonts/fonts.css` file to squelch this warning."
-            );
-        }
-        for font_file in &theme.font_files {
-            let contents = fs::read(font_file)?;
-            let filename = font_file.file_name().unwrap();
-            let filename = Path::new("fonts").join(filename);
-            write_file(destination, filename, &contents)?;
-        }
-
-        let playground_config = &html_config.playground;
-
-        // Ace is a very large dependency, so only load it when requested
-        if playground_config.editable && playground_config.copy_js {
-            // Load the editor
-            write_file(destination, "editor.js", playground_editor::JS)?;
-            write_file(destination, "ace.js", playground_editor::ACE_JS)?;
-            write_file(destination, "mode-rust.js", playground_editor::MODE_RUST_JS)?;
-            write_file(
-                destination,
-                "theme-dawn.js",
-                playground_editor::THEME_DAWN_JS,
-            )?;
-            write_file(
-                destination,
-                "theme-tomorrow_night.js",
-                playground_editor::THEME_TOMORROW_NIGHT_JS,
-            )?;
-        }
-
-        Ok(())
     }
 
     /// Update the context with data for this file
@@ -379,43 +253,6 @@ impl HtmlHandlebars {
         handlebars.register_helper("next", Box::new(helpers::navigation::next));
         // TODO: remove theme_option in 0.5, it is not needed.
         handlebars.register_helper("theme_option", Box::new(helpers::theme::theme_option));
-    }
-
-    /// Copy across any additional CSS and JavaScript files which the book
-    /// has been configured to use.
-    fn copy_additional_css_and_js(
-        &self,
-        html: &HtmlConfig,
-        root: &Path,
-        destination: &Path,
-    ) -> Result<()> {
-        let custom_files = html.additional_css.iter().chain(html.additional_js.iter());
-
-        debug!("Copying additional CSS and JS");
-
-        for custom_file in custom_files {
-            let input_location = root.join(custom_file);
-            let output_location = destination.join(custom_file);
-            if let Some(parent) = output_location.parent() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("Unable to create {}", parent.display()))?;
-            }
-            debug!(
-                "Copying {} -> {}",
-                input_location.display(),
-                output_location.display()
-            );
-
-            fs::copy(&input_location, &output_location).with_context(|| {
-                format!(
-                    "Unable to copy {} to {}",
-                    input_location.display(),
-                    output_location.display()
-                )
-            })?;
-        }
-
-        Ok(())
     }
 
     fn emit_redirects(
@@ -528,6 +365,11 @@ impl Renderer for HtmlHandlebars {
         debug!("Register the header handlebars template");
         handlebars.register_partial("header", String::from_utf8(theme.header.clone())?)?;
 
+        debug!("Register the toc handlebars template");
+        handlebars.register_template_string("toc_js", String::from_utf8(theme.toc_js.clone())?)?;
+        handlebars
+            .register_template_string("toc_html", String::from_utf8(theme.toc_html.clone())?)?;
+
         debug!("Register handlebars helpers");
         self.register_hbs_helpers(&mut handlebars, &html_config);
 
@@ -538,6 +380,57 @@ impl Renderer for HtmlHandlebars {
 
         fs::create_dir_all(destination)
             .with_context(|| "Unexpected error when constructing destination path")?;
+
+        let mut static_files = StaticFiles::new(&theme, &html_config, &ctx.root)?;
+
+        // Render search index
+        #[cfg(feature = "search")]
+        {
+            let default = crate::config::Search::default();
+            let search = html_config.search.as_ref().unwrap_or(&default);
+            if search.enable {
+                super::search::create_files(&search, &mut static_files, &book)?;
+            }
+        }
+
+        debug!("Render toc js");
+        {
+            let rendered_toc = handlebars.render("toc_js", &data)?;
+            static_files.add_builtin("toc.js", rendered_toc.as_bytes());
+            debug!("Creating toc.js ✓");
+        }
+
+        if html_config.hash_files {
+            static_files.hash_files()?;
+        }
+
+        debug!("Copy static files");
+        let resource_helper = static_files
+            .write_files(&destination)
+            .with_context(|| "Unable to copy across static files")?;
+
+        handlebars.register_helper("resource", Box::new(resource_helper));
+
+        debug!("Render toc html");
+        {
+            data.insert("is_toc_html".to_owned(), json!(true));
+            data.insert("path".to_owned(), json!("toc.html"));
+            let rendered_toc = handlebars.render("toc_html", &data)?;
+            utils::fs::write_file(destination, "toc.html", rendered_toc.as_bytes())?;
+            debug!("Creating toc.html ✓");
+            data.remove("path");
+            data.remove("is_toc_html");
+        }
+
+        utils::fs::write_file(
+            destination,
+            ".nojekyll",
+            b"This file makes sure that Github Pages doesn't process mdBook's output.\n",
+        )?;
+
+        if let Some(cname) = &html_config.cname {
+            utils::fs::write_file(destination, "CNAME", format!("{cname}\n").as_bytes())?;
+        }
 
         let mut is_index = true;
         for item in book.iter() {
@@ -581,21 +474,6 @@ impl Renderer for HtmlHandlebars {
 
             utils::fs::write_file(destination, "print.html", rendered.as_bytes())?;
             debug!("Creating print.html ✓");
-        }
-
-        debug!("Copy static files");
-        self.copy_static_files(destination, &theme, &html_config)
-            .with_context(|| "Unable to copy across static files")?;
-        self.copy_additional_css_and_js(&html_config, &ctx.root, destination)
-            .with_context(|| "Unable to copy across additional CSS and JS")?;
-
-        // Render search index
-        #[cfg(feature = "search")]
-        {
-            let search = html_config.search.unwrap_or_default();
-            if search.enable {
-                super::search::create_files(&search, destination, book)?;
-            }
         }
 
         self.emit_redirects(&ctx.destination, &handlebars, &html_config.redirect)
@@ -786,10 +664,10 @@ fn make_data(
 /// Goes through the rendered HTML, making sure all header tags have
 /// an anchor respectively so people can link to sections directly.
 fn build_header_links(html: &str) -> String {
-    static BUILD_HEADER_LINKS: Lazy<Regex> = Lazy::new(|| {
+    static BUILD_HEADER_LINKS: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r#"<h(\d)(?: id="([^"]+)")?(?: class="([^"]+)")?>(.*?)</h\d>"#).unwrap()
     });
-    static IGNORE_CLASS: &[&str] = &["menu-title"];
+    static IGNORE_CLASS: &[&str] = &["menu-title", "mdbook-help-title"];
 
     let mut id_counter = HashMap::new();
 
@@ -819,7 +697,7 @@ fn build_header_links(html: &str) -> String {
         .into_owned()
 }
 
-/// Insert a sinle link into a header, making sure each link gets its own
+/// Insert a single link into a header, making sure each link gets its own
 /// unique ID by appending an auto-incremented number (if necessary).
 fn insert_link_into_header(
     level: usize,
@@ -834,11 +712,7 @@ fn insert_link_into_header(
         .unwrap_or_default();
 
     format!(
-        r##"<h{level} id="{id}"{classes}><a class="header" href="#{id}">{text}</a></h{level}>"##,
-        level = level,
-        id = id,
-        text = content,
-        classes = classes
+        r##"<h{level} id="{id}"{classes}><a class="header" href="#{id}">{content}</a></h{level}>"##
     )
 }
 
@@ -851,8 +725,8 @@ fn insert_link_into_header(
 // ```
 // This function replaces all commas by spaces in the code block classes
 fn fix_code_blocks(html: &str) -> String {
-    static FIX_CODE_BLOCKS: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r##"<code([^>]+)class="([^"]+)"([^>]*)>"##).unwrap());
+    static FIX_CODE_BLOCKS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r##"<code([^>]+)class="([^"]+)"([^>]*)>"##).unwrap());
 
     FIX_CODE_BLOCKS
         .replace_all(html, |caps: &Captures<'_>| {
@@ -860,18 +734,13 @@ fn fix_code_blocks(html: &str) -> String {
             let classes = &caps[2].replace(',', " ");
             let after = &caps[3];
 
-            format!(
-                r#"<code{before}class="{classes}"{after}>"#,
-                before = before,
-                classes = classes,
-                after = after
-            )
+            format!(r#"<code{before}class="{classes}"{after}>"#)
         })
         .into_owned()
 }
 
-static CODE_BLOCK_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r##"((?s)<code[^>]?class="([^"]+)".*?>(.*?)</code>)"##).unwrap());
+static CODE_BLOCK_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r##"((?s)<code[^>]?class="([^"]+)".*?>(.*?)</code>)"##).unwrap());
 
 fn add_playground_pre(
     html: &str,
@@ -923,8 +792,7 @@ fn add_playground_pre(
                             // we need to inject our own main
                             let (attrs, code) = partition_source(code);
 
-                            format!("# #![allow(unused)]\n{}#fn main() {{\n{}#}}", attrs, code)
-                                .into()
+                            format!("# #![allow(unused)]\n{attrs}# fn main() {{\n{code}# }}").into()
                         };
                         content
                     }
@@ -940,8 +808,10 @@ fn add_playground_pre(
 /// Modifies all `<code>` blocks to convert "hidden" lines and to wrap them in
 /// a `<span class="boring">`.
 fn hide_lines(html: &str, code_config: &Code) -> String {
-    static LANGUAGE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\blanguage-(\w+)\b").unwrap());
-    static HIDELINES_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"\bhidelines=(\S+)").unwrap());
+    static LANGUAGE_REGEX: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\blanguage-(\w+)\b").unwrap());
+    static HIDELINES_REGEX: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\bhidelines=(\S+)").unwrap());
 
     CODE_BLOCK_RE
         .replace_all(html, |caps: &Captures<'_>| {
@@ -982,7 +852,8 @@ fn hide_lines(html: &str, code_config: &Code) -> String {
 }
 
 fn hide_lines_rust(content: &str) -> String {
-    static BORING_LINES_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(\s*)#(.?)(.*)$").unwrap());
+    static BORING_LINES_REGEX: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^(\s*)#(.?)(.*)$").unwrap());
 
     let mut result = String::with_capacity(content.len());
     let mut lines = content.lines().peekable();
@@ -996,12 +867,9 @@ fn hide_lines_rust(content: &str) -> String {
                 result += &caps[3];
                 result += newline;
                 continue;
-            } else if &caps[2] != "!" && &caps[2] != "[" {
+            } else if matches!(&caps[2], "" | " ") {
                 result += "<span class=\"boring\">";
                 result += &caps[1];
-                if &caps[2] != " " {
-                    result += &caps[2];
-                }
                 result += &caps[3];
                 result += newline;
                 result += "</span>";
@@ -1127,7 +995,7 @@ mod tests {
     fn add_playground() {
         let inputs = [
           ("<code class=\"language-rust\">x()</code>",
-           "<pre class=\"playground\"><code class=\"language-rust\"># #![allow(unused)]\n#fn main() {\nx()\n#}</code></pre>"),
+           "<pre class=\"playground\"><code class=\"language-rust\"># #![allow(unused)]\n# fn main() {\nx()\n# }</code></pre>"),
           ("<code class=\"language-rust\">fn main() {}</code>",
            "<pre class=\"playground\"><code class=\"language-rust\">fn main() {}</code></pre>"),
           ("<code class=\"language-rust editable\">let s = \"foo\n # bar\n\";</code>",
@@ -1157,7 +1025,7 @@ mod tests {
     fn add_playground_edition2015() {
         let inputs = [
           ("<code class=\"language-rust\">x()</code>",
-           "<pre class=\"playground\"><code class=\"language-rust edition2015\"># #![allow(unused)]\n#fn main() {\nx()\n#}</code></pre>"),
+           "<pre class=\"playground\"><code class=\"language-rust edition2015\"># #![allow(unused)]\n# fn main() {\nx()\n# }</code></pre>"),
           ("<code class=\"language-rust\">fn main() {}</code>",
            "<pre class=\"playground\"><code class=\"language-rust edition2015\">fn main() {}</code></pre>"),
           ("<code class=\"language-rust edition2015\">fn main() {}</code>",
@@ -1181,7 +1049,7 @@ mod tests {
     fn add_playground_edition2018() {
         let inputs = [
           ("<code class=\"language-rust\">x()</code>",
-           "<pre class=\"playground\"><code class=\"language-rust edition2018\"># #![allow(unused)]\n#fn main() {\nx()\n#}</code></pre>"),
+           "<pre class=\"playground\"><code class=\"language-rust edition2018\"># #![allow(unused)]\n# fn main() {\nx()\n# }</code></pre>"),
           ("<code class=\"language-rust\">fn main() {}</code>",
            "<pre class=\"playground\"><code class=\"language-rust edition2018\">fn main() {}</code></pre>"),
           ("<code class=\"language-rust edition2015\">fn main() {}</code>",
@@ -1205,7 +1073,7 @@ mod tests {
     fn add_playground_edition2021() {
         let inputs = [
             ("<code class=\"language-rust\">x()</code>",
-             "<pre class=\"playground\"><code class=\"language-rust edition2021\"># #![allow(unused)]\n#fn main() {\nx()\n#}</code></pre>"),
+             "<pre class=\"playground\"><code class=\"language-rust edition2021\"># #![allow(unused)]\n# fn main() {\nx()\n# }</code></pre>"),
             ("<code class=\"language-rust\">fn main() {}</code>",
              "<pre class=\"playground\"><code class=\"language-rust edition2021\">fn main() {}</code></pre>"),
             ("<code class=\"language-rust edition2015\">fn main() {}</code>",
@@ -1230,8 +1098,12 @@ mod tests {
     fn hide_lines_language_rust() {
         let inputs = [
           (
-           "<pre class=\"playground\"><code class=\"language-rust\">\n# #![allow(unused)]\n#fn main() {\nx()\n#}</code></pre>",
+           "<pre class=\"playground\"><code class=\"language-rust\">\n# #![allow(unused)]\n# fn main() {\nx()\n# }</code></pre>",
            "<pre class=\"playground\"><code class=\"language-rust\">\n<span class=\"boring\">#![allow(unused)]\n</span><span class=\"boring\">fn main() {\n</span>x()\n<span class=\"boring\">}</span></code></pre>",),
+          // # must be followed by a space for a line to be hidden
+          (
+           "<pre class=\"playground\"><code class=\"language-rust\">\n#fn main() {\nx()\n#}</code></pre>",
+           "<pre class=\"playground\"><code class=\"language-rust\">\n#fn main() {\nx()\n#}</code></pre>",),
           (
            "<pre class=\"playground\"><code class=\"language-rust\">fn main() {}</code></pre>",
            "<pre class=\"playground\"><code class=\"language-rust\">fn main() {}</code></pre>",),
